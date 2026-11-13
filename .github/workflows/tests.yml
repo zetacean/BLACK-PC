@@ -3,6 +3,7 @@ name: Tests
 # The subtitle and save-storage checks. They need no game files, so GitHub's own runners build them.
 on:
   push:
+    branches: [main]
     paths:
       - "src/common/subtitle*"
       - "src/common/save_*"
