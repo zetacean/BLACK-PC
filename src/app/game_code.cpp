@@ -120,6 +120,9 @@ std::vector<Image> Images() {
 fs::path WorkDir(const Image& image) { return CompilerDir() / "work" / image.exe; }
 fs::path CodeDll(const Image& image) { return ExeDir() / (image.exe + L".dll"); }
 fs::path StampFile(const Image& image) { return WorkDir(image) / "built.txt"; }
+// a copy of the stamp beside the DLL: deleting the compiler folder takes the one above with it, and without a stamp the
+// DLL is judged by its date against the executable's, which fails when the installed files' dates are in another zone
+fs::path KeptStamp(const Image& image) { return ExeDir() / (image.exe + L".stamp"); }
 std::wstring Quote(const fs::path& path) { return L"\"" + path.wstring() + L"\""; }
 fs::path CompileLog() { return ExeDir() / "logs" / "compile.log"; }
 
@@ -154,6 +157,7 @@ bool Current(const Target& target) {
     fs::file_time_type built = fs::last_write_time(CodeDll(*target.image), ec);
     if (ec) return false;
     std::ifstream f(StampFile(*target.image));
+    if (!f) f.open(KeptStamp(*target.image));
     if (!f) return built > fs::last_write_time(ExeDir() / (target.image->exe + L".exe"), ec);
     std::string line;
     return std::getline(f, line) && line == target.stamp;
@@ -606,6 +610,7 @@ uint64_t CompilerBytes() {
 // the game runs from the DLLs alone; a later release brings the compiler again
 void DeleteCompiler() {
     std::error_code ec;
+    for (const Image& image : Images()) fs::copy_file(StampFile(image), KeptStamp(image), fs::copy_options::overwrite_existing, ec);
     fs::remove_all(CompilerDir(), ec);
     if (ec) LOGE("Game code: deleting the compiler folder failed: %s", ec.message().c_str());
     else LOGR("Game code: compiler folder deleted");

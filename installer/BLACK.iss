@@ -23,6 +23,7 @@ OutputDir=..
 OutputBaseFilename=BLACK-PC-Setup
 SetupIconFile=..\src\common\black.ico
 UninstallDisplayIcon={app}\BLACK.exe
+TimeStampsInUTC=yes
 Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern

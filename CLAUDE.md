@@ -39,7 +39,7 @@ El SDK vive **fuera** del repo, en `..\XboxXBE-Recomp`, fijado al commit `91146f
 - Regenerar `prebuilt/`: `python tools/refresh_prebuilt.py "<iso>"`. **Solo** si cambias `config/game.toml` o añades/quitas hooks `X86_FUNC`; necesita el ISO del usuario. Si el enlace falla con símbolos sin resolver, `prebuilt/` está desactualizado.
 - Instalación silenciosa de prueba: `BLACK-PC-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LANG=fr /DIR="<carpeta>" /ISO="<iso>"`.
 
-Trampas de entorno ya vistas: en Git Bash pon `MSYS_NO_PATHCONV=1` para pasar `/LANG=...` a instaladores; lanza `.bat` con `cmd.exe //c ".\\archivo.bat"`; en scripts Python con rutas de Windows usa cadenas crudas o un archivo `.py` (los `\` en heredocs rompen); `clang` está en `C:\Program Files\LLVM\bin`. El primer ejecutable nuevo puede tardar minutos en abrir por el antivirus.
+Trampas de entorno ya vistas: en Git Bash pon `MSYS_NO_PATHCONV=1` para pasar `/LANG=...` a instaladores; lanza `.bat` con `cmd.exe //c ".\\archivo.bat"`; en scripts Python con rutas de Windows usa cadenas crudas o un archivo `.py` (los `\` en heredocs rompen); `clang` está en `C:\Program Files\LLVM\bin`. El primer ejecutable nuevo puede tardar minutos en abrir por el antivirus. Lo que compilas en local y lo que compila GitHub **no son iguales** (zona horaria de las fechas de los archivos, LLVM del runner): tras publicar, prueba el instalador descargado.
 
 ## Cómo enganchar y encontrar cosas en el juego
 

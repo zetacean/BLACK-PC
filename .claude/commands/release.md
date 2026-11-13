@@ -45,6 +45,7 @@ Si cambió algo que el jugador ve, actualiza también `docs/CHANGES.md` y `docs/
 - `gh run list --workflow release.yml --limit 3` y `gh run watch <id>`.
 - Si falla: `gh run view <id> --log-failed`, corrige, y repite. Si hace falta rehacer la etiqueta, eso es destructivo (`git push origin :refs/tags/<etiqueta>` y `gh release delete <etiqueta>`): pide confirmación explícita.
 - Al terminar: `gh release view <etiqueta> --json assets,url`. Deben estar `BLACK-PC-Setup.exe` y `BLACK-PC.zip`.
+- **Prueba lo publicado, no lo local:** descarga `BLACK-PC-Setup.exe` del release (`gh release download <etiqueta> -p BLACK-PC-Setup.exe`), instálalo en silencio en una carpeta temporal con el ISO del usuario y arranca `BLACK.exe` ~20 s: no debe salir ningún diálogo ni "Game code: building" en `logs\black.log`. El ejecutable de CI lleva fechas de otra zona horaria; en v1.0.0 eso rompió el arranque y solo se vio al probar el instalador descargado.
 
 ## 6. Informar al usuario
 
