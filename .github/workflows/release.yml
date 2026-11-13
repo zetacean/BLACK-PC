@@ -21,6 +21,11 @@ on:
 permissions:
   contents: write
 
+# one release build at a time per tag
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   package:
     runs-on: windows-latest
