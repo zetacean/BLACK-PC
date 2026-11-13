@@ -33,9 +33,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Toolchain (LLVM, the MSVC environment)
+      # the hosted image already has LLVM/clang (the tests workflow builds with it); its version is logged
+      - name: Toolchain (LLVM)
         shell: pwsh
-        run: choco install llvm --version 23.1.5 -y --no-progress
+        run: |
+          $env:Path = "C:\Program Files\LLVM\bin;$env:Path"
+          clang++ --version
+          cmake --version
+          ninja --version
 
       - name: Inno Setup (the installer)
         shell: pwsh
