@@ -905,6 +905,8 @@ void DrawWeapons() {
     }
     Section("AMMUNITION");
     if (ImGui::Button(Ui("FILL AMMUNITION").c_str(), ImVec2(w, 0))) weapons::FillAmmo();
+    bool health = weapons::InfiniteHealth();
+    if (ImGui::Checkbox(Ui("INFINITE HEALTH").c_str(), &health)) weapons::SetInfiniteHealth(health);
     if (!v.status.empty()) {
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Text, kDim);

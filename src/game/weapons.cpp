@@ -55,6 +55,8 @@ constexpr uint32_t kWorldSilver = 0x5CB0;  // byte: the level loaded Guns_s.bin
 // player
 constexpr uint32_t kPlayerKind = 0xC4;
 constexpr uint32_t kKindPlayer = 2;
+constexpr uint32_t kPlayerHealth = 0x2F0;  // float, 1200 full (found by diffing the player before and after a hit)
+constexpr float kFullHealth = 1200.0f;
 constexpr uint32_t kPlayerInventory = 0x278;
 // inventory: the ammunition of each type (words) first
 constexpr uint32_t kInvOwner = 0x1C;
@@ -120,6 +122,7 @@ std::mutex g_lock;
 weapons::View g_view;
 std::atomic<int> g_give{-1};
 std::atomic<bool> g_fill{false};
+std::atomic<bool> g_health{false};
 
 void SetStatus(const std::string& text) {
     std::lock_guard<std::mutex> lock(g_lock);
@@ -459,6 +462,10 @@ void Give(int type) { g_give = type; }
 
 void FillAmmo() { g_fill = true; }
 
+void SetInfiniteHealth(bool on) { g_health = on; }
+
+bool InfiniteHealth() { return g_health; }
+
 }  // namespace weapons
 
 // game thread, each menu and HUD tick (hooks.cpp MenuTick)
@@ -466,6 +473,12 @@ void WeaponsTick(X86Context& ctx) {
     static int tick;
     if (int type = g_give.exchange(-1); type >= 0) DoGive(ctx, type);
     if (g_fill.exchange(false)) DoFill();
+    if (g_health) {
+        Level l;
+        // a dead player (0 or less) is not brought back
+        if (ReadLevel(l) && G<float>(l.player + kPlayerHealth) > 0 && G<float>(l.player + kPlayerHealth) < kFullHealth)
+            G<float>(l.player + kPlayerHealth) = kFullHealth;
+    }
     if (++tick % 10 == 0) Refresh();
 }
 

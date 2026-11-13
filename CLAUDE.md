@@ -49,10 +49,14 @@ Trampas de entorno ya vistas: en Git Bash pon `MSYS_NO_PATHCONV=1` para pasar `/
 
 ## Estado y límites conocidos
 
-- Sin implementar: elegir qué arma reemplaza una nueva (se intentó en F10 por dos caminos y falló por la animación del arma en mano; la vía real es enganchar la recogida del suelo), rellenar salud/modo Dios/munición infinita (hace falta localizar el campo de salud con una sonda en ejecución), silenciador, botón de idioma en el menú de pausa (otro clip Flash, sin poder ver el resultado), upscaling DLSS/FSR.
+- Sin implementar: elegir qué arma reemplaza una nueva (se intentó en F10 por dos caminos y falló por la animación del arma en mano; la vía real es enganchar la recogida del suelo), munición infinita y modo Dios real (la salud infinita sí está: `player+0x2F0`, float, 1200 al máximo; la munición ya tiene botón de rellenar), sprint (se midió: correr es 4,5 u/s y no hay campo de velocidad localizado; se descartó), silenciador, botón de idioma en el menú de pausa (otro clip Flash, sin poder ver el resultado), upscaling DLSS/FSR.
 - Sin validar: gyro con mando real, una partida completa, el workflow de release en GitHub, el test con MSVC.
 - Las traducciones del instalador (fr, de, it, pt-BR, ru) las hizo una IA: pendientes de revisión nativa.
 - La licencia propia no existe: ninguno de los dos repos base publica una. Solo se incluye la MIT del SDK y los avisos de terceros.
+
+## Sondear el juego sin compilar
+
+Para encontrar campos del jugador no compiles: lee la memoria de `BLACK.exe` desde Python con `ReadProcessMemory`. La memoria del xbox está en `0x100000000 + dirección`; el mundo es `R32(0x2D45D4)` y el jugador `mundo + 0x30`. Toma una captura del objeto del jugador antes y después de un cambio (daño, correr) y compara. Así se halló la salud. Para probar un cambio de ejecutable sin recompilar `Black.dll`, actualiza `Black.stamp` (tamaño, FILETIME del exe, sha1).
 
 ## Releases
 
