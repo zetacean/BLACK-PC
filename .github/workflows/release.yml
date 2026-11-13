@@ -1,0 +1,102 @@
+name: Release
+
+# The release executable does not need the game: it is built from prebuilt/ (the names and addresses of the xbe's
+# functions, no game code) and builds the game's code from the player's own default.xbe on its first start. So this
+# runs on GitHub's hosted runners. prebuilt/ is refreshed with tools/refresh_prebuilt.py after a local build that
+# had the game (see docs/RELEASING.md); the game itself is never in the repository or in the packages.
+#
+# A tag v* builds and publishes the release; "Run workflow" builds and attaches the package to the run only,
+# or publishes too when the box is ticked and the workflow is run from a v* tag.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a GitHub release (run it from a v* tag)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain (LLVM, the MSVC environment)
+        shell: pwsh
+        run: choco install llvm --version 23.1.5 -y --no-progress
+
+      - name: Inno Setup (the installer)
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Unit tests
+        shell: cmd
+        run: |
+          set "PATH=C:\Program Files\LLVM\bin;%PATH%"
+          cmake -S tests -B out\tests -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release || exit /b 1
+          cmake --build out\tests || exit /b 1
+          ctest --test-dir out\tests --output-on-failure
+
+      - name: Build
+        shell: cmd
+        run: |
+          set "PATH=C:\Program Files\LLVM\bin;%PATH%"
+          cmake --preset release || exit /b 1
+          cmake --build out\build\release || exit /b 1
+
+      - name: Package
+        shell: cmd
+        run: |
+          set "PATH=C:\Program Files\LLVM\bin;%PATH%"
+          call release.bat
+
+      - name: Check the package
+        shell: pwsh
+        run: |
+          foreach ($f in 'BLACK-PC.zip', 'BLACK-PC-Setup.exe') {
+            if (-not (Test-Path $f)) { throw "$f was not made" }
+          }
+          $names = 7z l -ba BLACK-PC.zip
+          if (-not ($names -match 'BLACK\.exe')) { throw "BLACK.exe is not in BLACK-PC.zip" }
+          # the game itself must never ship
+          if ($names -match 'default\.xbe|GlobData\.bin|\.iso') { throw "game files found in the package" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BLACK-PC
+          path: |
+            BLACK-PC.zip
+            BLACK-PC-Setup.exe
+          retention-days: 14
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || inputs.publish)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $notes = "Build $env:TAG. Run BLACK-PC-Setup.exe and choose your own copy of the game (an .iso, USA or Europe); it prepares everything. " +
+                   "BLACK-PC.zip is the same without an installer: extract it, put your .iso beside BLACK.exe and run it. " +
+                   "No game data is included. See the README and docs/ for the details."
+          # the notes written for this version (docs/release-notes/<tag>.md, see docs/RELEASING.md), else the generic ones
+          $notesFile = "docs/release-notes/$env:TAG.md"
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG BLACK-PC-Setup.exe BLACK-PC.zip --clobber
+          } elseif (Test-Path $notesFile) {
+            gh release create $env:TAG BLACK-PC-Setup.exe BLACK-PC.zip --title "BLACK PC $env:TAG" --notes-file $notesFile
+          } else {
+            gh release create $env:TAG BLACK-PC-Setup.exe BLACK-PC.zip --title "BLACK PC $env:TAG" --notes $notes
+          }

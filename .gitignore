@@ -1,0 +1,39 @@
+# build
+/out/
+/build/
+*.zip
+*.pdb
+*.exe
+*.obj
+*.o
+
+# recompiled code, derived from the game
+/generated/
+
+# user's own game files
+/assets/
+
+# runtime files
+black.toml
+/logs/
+/hdd/
+/CrashDumps/
+
+# editors
+.vs/
+.vscode/
+.idea/
+
+# Local temporary folder
+.local
+
+# runtime files beside the exe when it is run from the repo root
+*.log
+/Black.dll
+/translations/
+/textures/
+/BLACK.exe
+/package/
+
+# Claude Code: local settings are personal
+.claude/settings.local.json

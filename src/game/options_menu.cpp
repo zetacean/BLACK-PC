@@ -1,0 +1,939 @@
+// Recomp settings in the game's own options menus: RECOMP SETTINGS, MOUSE AND KEYBOARD and CONTROLLER buttons under
+// the stock ones load the page again with the F10 panel's rows in their place. A row is two copies of a stock button
+// clip, its name and its value; the name's copy stands in for the script's button object, so the script moves the
+// focus and the cursor works. On the pause menu's options our buttons take the prompts' rows: the select prompt goes,
+// copies of the confirm and back prompts sit side by side below. The front end's options also get a LANGUAGE button
+// above the stock ones: its page lists the languages and opens the subtitle settings, with a live preview.
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <iterator>
+#include <string>
+#include <vector>
+
+#include "common/aspect.h"
+#include "common/menu.h"
+#include "common/mouse_keyboard.h"
+#include "common/options.h"
+#include "common/subtitle_layout.h"
+#include "common/subtitles.h"
+#include "common/translations.h"
+#include "core/log.h"
+#include "game/flash.h"
+#include "game/layout.h"
+#include "xdk/hle.h"
+
+using namespace kernel;
+using namespace layout;
+using app::rows::Row;
+using flash::Button;
+using flash::Find;
+using flash::FindField;
+using flash::Focus;
+using flash::Link;
+using flash::Member;
+using flash::Members;
+using flash::Method;
+using flash::Set;
+using flash::String;
+using flash::Text;
+
+namespace {
+
+constexpr uint32_t kHashTable = 0x2AC908;
+const char* const kCaptions[] = {"RECOMP SETTINGS", "MOUSE AND KEYBOARD", "CONTROLLER"};
+constexpr const char* kLanguageCaption = "LANGUAGE";
+constexpr const char* kSubtitleSettingsCaption = "SUBTITLE SETTINGS";
+constexpr int kEntries = int(std::size(kCaptions)) + 1;  // the most buttons a page has: ours and the language one
+constexpr int kSubtitleSettingsMode = kEntries + 1;      // the language page's subtitle settings
+constexpr int kSlots = 8;
+constexpr int kDepth = 100;
+constexpr int kEscape = 0x1B;
+constexpr int kPrompts = 2;
+
+// the selection bar, Main.ButtonSelector: its parts by depth; once shown it stops on frame 10, its data's frame 9
+constexpr int kBarRest = 9;
+constexpr int kBarBox = 1;
+constexpr int kBarLine = 5;
+constexpr int kBarTick = 7;
+constexpr int kBarScan = 11;
+constexpr float kBarLeft = -5.0f;  // the box's left end and the left tick
+constexpr float kTickGap = 10.0f;  // past the end of the widest value
+constexpr float kNameGap = 12.0f;  // between the widest name and the values
+
+// TextAnim's flashes on the stock rows as the page opens, by depth: an 8 wide square scaled 30 about x 112.3
+constexpr int kFlashFirst = 9;
+constexpr int kFlashLast = 21;
+constexpr float kFlashLeft = -7.7f;
+constexpr float kFlashWidth = 240.0f;
+
+// the rows' font, as the name entry's caret measures it
+constexpr uint32_t kFindFont = 0x13CD0;   // stdcall (game object, name): a font
+constexpr uint32_t kFontName = 0x28E63C;  // "Eurostile LT Std"
+constexpr float kTextHeight = 15.0f;      // the stock buttons' text fields
+constexpr float kTextLeft = 2.0f;         // the text field in its button's label clip
+constexpr uint32_t kCaptionFont = 0x2F433C;  // the game's Small.bin font, also used for cutscene subtitles
+
+// the stock bar on frame 10: its box's x scale, the x of its right tick, right line and Scan
+struct Bar {
+    float box;
+    float tick;
+    float line;
+    float scan;
+};
+
+// an options page of the game
+struct Host {
+    const char* page;
+    const char* holder;        // the clip in Main its buttons are in, null for Main
+    const char* button;        // a stock button, copied for ours
+    const char* under;         // the clip our buttons go under, the first this far down
+    float drop;
+    const char* first;         // the first and last button objects of its ring
+    const char* last;
+    // the rows, from the stock button
+    float pitch;
+    float name_x;
+    float value_x;
+    float scale;
+    float lit;                 // the name's scale once focused, its HighlightFrame
+    const char* hint;          // the string of a prompt our buttons take the place of
+    const char* stock[14];     // what the rows take the place of
+    Bar bar;
+    // prompts our buttons push down, copied in a row below them: x of each and y, from the stock clip
+    const char* prompts[kPrompts];
+    float prompt_x[kPrompts];
+    float prompt_y;
+    bool flashes;  // TextAnim flashes a box on each stock row
+    bool language;  // a LANGUAGE button above the stock ones, and its pages
+};
+constexpr Host kHosts[] = {
+    {"OptionsMenuXbox", "TextAnim", "_level4.Main.TextAnim.ControllerSetup_Text", "Playerprofile_Text", 25.0f,
+     "controllerButton", "Playerprofile", 25.0f, 0.0f, 185.0f, 0.9f, 1.1f, nullptr,
+     {"ControllerSetup_Text", "SoundSetup_Text", "PictureSetup_Text", "Playerprofile_Text"},
+     {1.0f, 245.0f, 445.0f, -5.0f}, {}, {}, 0.0f, true, true},
+    {"PauseMenuOptionXbox", nullptr, "_level4.Main.ToggleCrouch", "ToggleCrouch", 222.0f,
+     "toggleCrouchButton", "musicVolumeButton", 27.0f, 0.0f, 245.0f, 1.0f, 1.0f, "$FE_SELECT",
+     {"ToggleCrouch", "ToggleCrouchOn_Text", "ToggleCrouchOff_Text", "InvertLook", "InvertLookOn_Text",
+      "InvertLookOff_Text", "Vibration", "VibrationOn_Text", "VibrationOff_Text", "SFXVolume", "Sound_Volume",
+      "MusicVolume", "Music_Volume"},
+     {1.4f, 343.55f, 443.55f, 168.35f},
+     // stage y 458 under the third button's bar (to 441), the screen ends at 480
+     {"_level4.Main.ConfirmPrompt", "_level4.Main.BackPrompt"}, {-16.0f, 164.0f}, 306.0f, false, false},
+};
+
+// a text the page shows from here: its string id, the text, the data of the field showing it
+struct Field {
+    uint32_t id;
+    uint32_t text;
+    uint32_t data;
+};
+enum { kTitle, kEntry, kName = kEntry + kEntries, kValue = kName + kSlots, kFields = kValue + kSlots };
+constexpr uint32_t kFieldSize = 256;
+Field g_fields[kFields];
+
+struct Page {
+    const Host* host = nullptr;
+    int mode = -1;  // 0 the stock buttons and ours, else the rows of a page: see FirstPageMode
+    bool failed = false;
+    uint32_t first = 0;  // our first clip
+    uint32_t lead = 0;   // the stock clip ours keep their places from
+    uint32_t language_lead = 0;  // the first stock option, above which the language entry sits
+    uint32_t entry[kEntries] = {};
+    uint32_t prompt[kPrompts] = {};
+    uint32_t name[kSlots] = {};
+    uint32_t value[kSlots] = {};
+    uint32_t preview_background = 0;
+    size_t slots = 0;
+    size_t top = 0;
+    float value_x = 0;  // the values' column, past the widest name
+    std::vector<const Row*> rows;  // null restores the defaults
+    const Row* pinned_row = nullptr;  // remains at the bottom while the rows above it scroll
+    int capture = 0;  // a key binding: 1 the keys come up, 2 the next key binds or Escape leaves, 3 they come up again
+    size_t bind = 0;  // its row
+};
+Page g_page;     // game thread
+int g_next = 0;  // the mode of the page being loaded
+int g_last = 0;  // the mode before it, whose button takes the focus back
+const Row* g_group = nullptr;  // the settings' category shown, null for the list of them
+
+// With a language button the pages are: mode 1 the languages, 2 and on the captions', kSubtitleSettingsMode the
+// subtitle settings. Without, the captions' pages are modes 1 and on
+int EntryCount(const Host& h) { return int(std::size(kCaptions)) + (h.language ? 1 : 0); }
+int FirstPageMode(const Host& h) { return h.language ? 2 : 1; }
+int PageIndex(const Page& p) { return p.mode - FirstPageMode(*p.host); }
+bool IsLanguagePage(const Page& p) { return p.host->language && p.mode == 1; }
+bool IsSubtitlePage(const Page& p) { return p.host->language && p.mode == kSubtitleSettingsMode; }
+
+const char* PageCaption(const Page& p) {
+    if (IsLanguagePage(p)) return kLanguageCaption;
+    if (IsSubtitlePage(p)) return kSubtitleSettingsCaption;
+    return kCaptions[PageIndex(p)];
+}
+
+// the id of a string by its name
+uint32_t Hash(const char* text) {
+    uint32_t h = ~0u;
+    for (; *text; text++) h = uint32_t(int32_t(h) >> 8) ^ R32(kHashTable + ((h ^ uint8_t(*text)) & 0xFF) * 4);
+    return h;
+}
+
+// that field shows field n from now on
+bool Show(X86Context& ctx, int n, uint32_t clip, const char* shows = nullptr, const char* text = nullptr) {
+    Field& f = g_fields[n];
+    char name[16];
+    std::snprintf(name, sizeof(name), "$RC_%d", n);
+    if (!f.text) {
+        f.id = Hash(name + 1);
+        f.text = mem::AllocSystem(kFieldSize);
+        G<char>(f.text) = 0;
+    }
+    uint32_t field = FindField(clip, shows);
+    if (!field) return false;
+    f.data = R32(field + flash::kClipData);
+    if (text) std::snprintf(static_cast<char*>(HostPtr(f.text)), kFieldSize, "%s", text);
+    return Set(ctx, field, "variable", String(ctx, name));
+}
+
+void Write(Field& f, const std::string& text) {
+    char* shown = static_cast<char*>(HostPtr(f.text));
+    if (!f.data || std::strncmp(text.c_str(), shown, kFieldSize - 1) == 0) return;
+    std::snprintf(shown, kFieldSize, "%s", text.c_str());
+    // made again at the next draw
+    W32(f.data + flash::kFieldFlags, (R32(f.data + flash::kFieldFlags) & ~1u) | 0x204);
+}
+
+// a copy of a stock clip beside it, stopped
+uint32_t Copy(X86Context& ctx, uint32_t holder, const char* from, const char* name, int depth) {
+    char number[12];
+    std::snprintf(number, sizeof(number), "%d", depth);
+    ctx.eax = Text(from);
+    CallGuest(ctx, flash::kCall, {Text("duplicateMovieClip"), 0, 2, Text(name), Text(number)});
+    uint32_t clip = Member(ctx, holder, name);
+    if (flash::Type(clip) != flash::kSprite) return 0;
+    uint32_t data = R32(clip + flash::kClipData);
+    W32(data + flash::kDataFlags, R32(data + flash::kDataFlags) & ~flash::kDataPlaying);
+    return clip;
+}
+
+void Hide(uint32_t clip) {
+    if (flash::IsClip(clip)) W32(clip + flash::kClipFlags, R32(clip + flash::kClipFlags) & ~flash::kClipShown);
+}
+
+// ours keep their places from a stock clip, which the page slides and fades in: x, y, then its colours
+float Measure(uint32_t font, const std::string& text);
+
+void Follow(X86Context& ctx, const Page& p) {
+    const Host& h = *p.host;
+    auto follow = [](uint32_t clip, uint32_t anchor, float x, float y) {
+        if (!clip) return;
+        G<float>(clip + flash::kClipX) = G<float>(anchor + flash::kClipX) + x;
+        G<float>(clip + flash::kClipY) = G<float>(anchor + flash::kClipY) + y;
+        std::memcpy(HostPtr(clip + flash::kClipColours), HostPtr(anchor + flash::kClipColours), flash::kColoursSize);
+    };
+    for (int i = 0; i < EntryCount(h); i++) {
+        if (h.language && i == 0) {
+            follow(p.entry[i], p.language_lead, 0.0f, -h.pitch);
+        } else {
+            int row = i - (h.language ? 1 : 0);
+            follow(p.entry[i], p.lead, 0.0f, h.drop + h.pitch * float(row));
+        }
+    }
+    for (int i = 0; i < kPrompts; i++) follow(p.prompt[i], p.lead, h.prompt_x[i], h.prompt_y);
+    for (int i = 0; i < kSlots; i++) {
+        follow(p.name[i], p.lead, h.name_x, h.pitch * float(i));
+        if (p.preview_background && p.pinned_row && i == int(p.slots) - 1 && IsSubtitlePage(p)) {
+            // the preview row sits under the label up to its R, scaled like the subtitles
+            const uint32_t font = CallGuest(ctx, kFindFont, {R32(kGame), kFontName});
+            const std::string label = app::Ui(p.pinned_row->label);
+            const size_t r = label.find('R');
+            const std::string before_r = r == std::string::npos ? std::string{} : label.substr(0, r);
+            const float scale = h.scale * float(game::Opt().subtitle_size) / 100.0f;
+            follow(p.value[i], p.name[i], Measure(font, before_r) * kTextHeight, h.pitch);
+            G<float>(p.value[i] + flash::kClipScaleX) = scale;
+            G<float>(p.value[i] + flash::kClipScaleY) = scale;
+        } else {
+            follow(p.value[i], p.lead, p.value_x, h.pitch * float(i));
+        }
+    }
+}
+
+void Sound(X86Context& ctx) {
+    ctx.eax = Text("_level4.MyMenu");
+    CallGuest(ctx, flash::kCall, {Text("PlayChangeSound"), 0, 0});
+}
+
+// the prompts our buttons push down: each hidden, a copy in its place below
+bool MovePrompts(X86Context& ctx, uint32_t holder) {
+    Page& p = g_page;
+    for (int i = 0; i < kPrompts; i++) {
+        const char* from = p.host->prompts[i];
+        if (!from) continue;
+        char name[16];
+        std::snprintf(name, sizeof(name), "RC_P%d", i);
+        if (!(p.prompt[i] = Copy(ctx, holder, from, name, kDepth + kEntries + i))) return false;
+        Hide(Member(ctx, holder, std::strrchr(from, '.') + 1));
+    }
+    return true;
+}
+
+// our buttons under the stock ones, in their ring
+bool Entries(X86Context& ctx, uint32_t root, uint32_t holder) {
+    Page& p = g_page;
+    const Host& h = *p.host;
+    const int count = EntryCount(h);
+    uint32_t top = Member(ctx, root, h.first);
+    uint32_t above = Member(ctx, root, h.last);
+    p.lead = Member(ctx, holder, h.under);
+    if (!top || !above || !flash::IsClip(p.lead)) return false;
+    if (h.language) {
+        p.language_lead = Member(ctx, holder, "ControllerSetup_Text");
+        if (!flash::IsClip(p.language_lead)) return false;
+    }
+    for (int i = 0; i < count; i++) {
+        char name[16];
+        std::snprintf(name, sizeof(name), "RC_E%d", i);
+        if (!(p.entry[i] = Copy(ctx, holder, h.button, name, kDepth + i))) return false;
+        const char* caption = h.language ? (i == 0 ? kLanguageCaption : kCaptions[i - 1]) : kCaptions[i];
+        if (!Show(ctx, kEntry + i, p.entry[i], nullptr, app::Ui(caption).c_str())) return false;
+    }
+    if (!MovePrompts(ctx, holder)) return false;
+    p.first = p.entry[0];
+    Follow(ctx, p);
+    CallGuest(ctx, flash::kRunActions, {R32(flash::kPlayer)});
+    for (int i = 0; i < count; i++) {
+        if (!Button(ctx, p.entry[i], top)) return false;
+        if (!Set(ctx, p.entry[i], "actionSelectPage", String(ctx, h.page))) return false;
+    }
+    if (h.language) {
+        // the original order, LANGUAGE going in before the first stock button
+        Link(ctx, above, p.entry[1]);
+        Link(ctx, p.entry[1], p.entry[2]);
+        Link(ctx, p.entry[2], p.entry[3]);
+        Link(ctx, p.entry[3], p.entry[0]);
+        Link(ctx, p.entry[0], top);
+    } else {
+        for (int i = 0; i < count; i++) {
+            Link(ctx, above, p.entry[i]);
+            above = p.entry[i];
+        }
+        Link(ctx, above, top);
+    }
+    if (!h.hint) return true;
+    for (uint32_t clip = FindField(holder, h.hint); clip; clip = R32(clip + flash::kClipParent))
+        if (R32(clip + flash::kClipParent) == holder) Hide(clip);
+    return true;
+}
+
+// the settings pages show a list of their categories first
+bool Grouped(const Host& h, int mode) { return mode >= FirstPageMode(h) && mode < kSubtitleSettingsMode; }
+
+// a grouped page's categories, each a row
+bool Listing(const Page& p) { return Grouped(*p.host, p.mode) && !g_group; }
+
+// the rows of the page's mode
+void Fill(Page& p) {
+    p.rows.clear();
+    p.pinned_row = nullptr;
+    size_t count = 0;
+    if (IsSubtitlePage(p)) {
+        const Row* settings = app::rows::SubtitleSettings(&count);
+        if (count) {
+            p.pinned_row = &settings[count - 1];
+            count--;
+        }
+        for (size_t i = 0; i < count; i++) p.rows.push_back(&settings[i]);
+    } else if (IsLanguagePage(p)) {
+        const Row* languages = app::rows::Languages(&count);
+        for (size_t i = 0; i < count; i++) p.rows.push_back(&languages[i]);
+    } else {
+        const Row* list = app::rows::Page(PageIndex(p), &count);
+        bool listing = Listing(p);
+        bool inside = !g_group;
+        for (size_t i = 0; i < count; i++) {
+            bool heading = list[i].kind == app::rows::Kind::Heading;
+            if (g_group && heading) inside = &list[i] == g_group;
+            if (heading == listing && inside) p.rows.push_back(&list[i]);
+        }
+        if (PageIndex(p) > 0 && listing) p.rows.push_back(nullptr);
+    }
+    p.slots = std::min<size_t>(kSlots, p.rows.size() + (p.pinned_row ? 1u : 0u));
+    p.top = 0;
+}
+
+const Row* VisibleRow(const Page& p, size_t slot) {
+    if (p.pinned_row && slot == p.slots - 1) return p.pinned_row;
+    const size_t index = p.top + slot;
+    return index < p.rows.size() ? p.rows[index] : nullptr;
+}
+
+// the rows of a page changed in place: the slots it shows, the others hidden
+void RefreshRows(X86Context& ctx, Page& p) {
+    for (size_t i = 0; i < kSlots; i++) {
+        if (i < p.slots) {
+            Show(ctx, kName + int(i), p.name[i]);
+            Show(ctx, kValue + int(i), p.value[i]);
+            W32(p.name[i] + flash::kClipFlags, R32(p.name[i] + flash::kClipFlags) | flash::kClipShown);
+            W32(p.value[i] + flash::kClipFlags, R32(p.value[i] + flash::kClipFlags) | flash::kClipShown);
+        } else {
+            Hide(p.name[i]);
+            Hide(p.value[i]);
+        }
+    }
+}
+
+float ValueColumn(X86Context& ctx, const Page& p);
+
+// the panel's rows in place of the stock buttons
+bool Rows(X86Context& ctx, uint32_t root, uint32_t holder, uint32_t menu) {
+    Page& p = g_page;
+    const Host& h = *p.host;
+    uint32_t like = Member(ctx, root, h.first);
+    uint32_t nothing = Method(ctx, like, "Select");
+    p.lead = Member(ctx, holder, std::strrchr(h.button, '.') + 1);
+    if (!nothing || !flash::IsClip(p.lead)) return false;
+    Fill(p);
+    // the language pages change in place, so ours have the clips of every slot
+    const size_t made = h.language ? size_t(kSlots) : p.slots;
+    for (size_t i = 0; i < made; i++) {
+        char name[16];
+        std::snprintf(name, sizeof(name), "RC_N%d", int(i));
+        p.name[i] = Copy(ctx, holder, h.button, name, kDepth + int(i));
+        name[3] = 'V';
+        p.value[i] = Copy(ctx, holder, h.button, name, kDepth + kSlots + int(i));
+        if (!p.name[i] || !p.value[i]) return false;
+        for (uint32_t clip : {p.name[i], p.value[i]}) {
+            G<float>(clip + flash::kClipScaleX) = h.scale;
+            G<float>(clip + flash::kClipScaleY) = h.scale;
+        }
+        if (!Show(ctx, kName + int(i), p.name[i]) || !Show(ctx, kValue + int(i), p.value[i])) return false;
+    }
+    for (size_t i = p.slots; i < made; i++) {
+        Hide(p.name[i]);
+        Hide(p.value[i]);
+    }
+    p.first = p.name[0];
+    p.value_x = ValueColumn(ctx, p);
+    Follow(ctx, p);
+    CallGuest(ctx, flash::kRunActions, {R32(flash::kPlayer)});
+    for (size_t i = 0; i < p.slots; i++) {
+        // a confirm on a button with no action is a back
+        if (!Button(ctx, p.name[i], like)) return false;
+        // a category loads the page again, with its rows
+        bool set = Listing(p) ? Set(ctx, p.name[i], "actionSelectPage", String(ctx, h.page))
+                              : Set(ctx, p.name[i], "actionSelectFunction", nothing);
+        if (!set) return false;
+        if (i) Link(ctx, p.name[i - 1], p.name[i]);
+    }
+    for (const char* stock : h.stock)
+        if (stock) Hide(Member(ctx, holder, stock));
+    Show(ctx, kTitle, holder, "$FE_OPTIONS");
+    // back is the options page, not its own back
+    Set(ctx, menu, "mfuncFunctionBack", 0);
+    Set(ctx, menu, "mstrPageBack", String(ctx, h.page));
+    Focus(ctx, p.name[0]);
+    return true;
+}
+
+std::string NameText(const Row* row) { return app::Ui(row ? row->label : "RESTORE DEFAULTS"); }
+
+// what row i of the page shows as its value
+std::string ValueText(const Page& p, const Row* row, size_t index) {
+    if ((p.capture == 1 || p.capture == 2) && p.bind == index) return app::Ui("PRESS A KEY");
+    if (!row || row->kind == app::rows::Kind::Heading) return " ";
+    std::string value = app::rows::Value(*row);
+    // key names as they are
+    if (row->kind == app::rows::Kind::Bind && value != "UNBOUND") return value;
+    return app::Ui(value);
+}
+
+uint32_t Glyph(uint32_t font, uint16_t code) {
+    uint32_t glyph = R32(font + kFontGlyphs + (code & 0x7F) * 4);
+    uint32_t last = R32(font + kFontLastGlyph);
+    if (!glyph) return last;
+    for (int left = 256; G<uint16_t>(glyph + kGlyphCode) != code && glyph != last && left; left--) glyph += kGlyphSize;
+    return glyph;
+}
+
+// UTF-8 text's characters, as the font codes its glyphs
+std::vector<uint16_t> Codes(const std::string& text) {
+    std::vector<uint16_t> codes;
+    for (size_t i = 0; i < text.size(); i++) {
+        uint8_t c = uint8_t(text[i]);
+        if (c >= 0xE0 && i + 2 < text.size()) {
+            codes.push_back(uint16_t((c & 0x0F) << 12 | (text[i + 1] & 0x3F) << 6 | (text[i + 2] & 0x3F)));
+            i += 2;
+        } else if (c >= 0xC0 && i + 1 < text.size()) {
+            codes.push_back(uint16_t((c & 0x1F) << 6 | (text[i + 1] & 0x3F)));
+            i++;
+        } else {
+            codes.push_back(c);
+        }
+    }
+    return codes;
+}
+
+// a text's width at a height of 1, as 0xC3AF0
+float Measure(uint32_t font, const std::string& text) {
+    std::vector<uint16_t> codes = Codes(text);
+    if (!font || codes.empty()) return 0.0f;
+    uint32_t glyph = Glyph(font, codes[0]);
+    float x = -G<float>(glyph + kGlyphLeft);
+    for (size_t i = 1; i < codes.size(); i++) {
+        x += G<float>(glyph + kGlyphAdvance);
+        glyph = Glyph(font, codes[i]);
+    }
+    float spacing = R32(glyph + kGlyphSpaced) ? G<float>(font + kFontSpacing) : 1.0f;
+    float end = x + G<float>(glyph + kGlyphLeft) + G<float>(glyph + kGlyphWidth) * spacing;
+    return G<float>(font + kFontScale) * end;
+}
+
+// Match the actual subtitle renderer's advance calculation. Using the menu's
+// Eurostile font here made the preview backing box disagree with Small.bin.
+float MeasureCaption(uint32_t font, const std::string& text, float host_scale) {
+    if (!font) return 0.0f;
+    float advance = 0.0f;
+    const std::string& language = game::BootLanguage();
+    const bool portuguese = language == "pt-BR" || language == "pt" || language == "por";
+    for (uint16_t code : Codes(text)) {
+        code = subtitles::DisplayGlyph(code, portuguese);
+        advance += G<float>(Glyph(font, code) + kGlyphAdvance);
+    }
+    return advance * G<float>(font + kFontScale) * kTextHeight *
+           float(game::Opt().subtitle_size) / 100.0f * host_scale;
+}
+
+// the stock column, further right when a focused name would run into it
+float ValueColumn(X86Context& ctx, const Page& p) {
+    const Host& h = *p.host;
+    uint32_t font = CallGuest(ctx, kFindFont, {R32(kGame), kFontName});
+    float widest = 0.0f;
+    for (const Row* row : p.rows) widest = std::max(widest, Measure(font, NameText(row)));
+    float name_end = h.name_x + (kTextLeft + widest * kTextHeight) * h.scale * h.lit;
+    return std::max(h.value_x, name_end + kNameGap);
+}
+
+// how far right of the focused name the widest value of the page ends, the label clip scaled as it lights
+float Reach(X86Context& ctx, const Page& p, uint32_t focus) {
+    const Host& h = *p.host;
+    uint32_t font = CallGuest(ctx, kFindFont, {R32(kGame), kFontName});
+    uint32_t label = flash::FirstChild(focus);
+    float scale = h.scale * (label ? G<float>(label + flash::kClipScaleX) : 1.0f);
+    // capture text left out so the bar keeps its width while a key is bound
+    Page shown = p;
+    shown.capture = 0;
+    float widest = 0.0f;
+    for (size_t i = 0; i < p.rows.size(); i++) widest = std::max(widest, Measure(font, ValueText(shown, p.rows[i], i)));
+    return p.value_x - h.name_x + (kTextLeft + widest * kTextHeight) * scale + kTickGap;
+}
+
+// the bar on the focused row reaches right, past the values, its ends and line as stock
+void StretchBar(X86Context& ctx, const Page& p, uint32_t root, float right) {
+    const Bar& stock = p.host->bar;
+    uint32_t bar = Member(ctx, Member(ctx, root, "Main"), "ButtonSelector");
+    if (flash::Type(bar) != flash::kSprite) return;
+    uint32_t data = R32(bar + flash::kClipData);
+    if (!data || data == flash::kNoData || R32(data + flash::kDataFrame) != kBarRest) return;
+    float stretch = (right - kBarLeft) / (stock.tick - kBarLeft);
+    int left = 256;
+    for (uint32_t part = flash::FirstChild(bar); part && left; part = R32(part + flash::kClipNext), left--) {
+        int depth = flash::Depth(part);
+        if (depth == kBarBox) G<float>(part + flash::kClipScaleX) = stock.box * stretch;
+        if (depth == kBarLine) G<float>(part + flash::kClipX) = stock.line + right - stock.tick;
+        if (depth == kBarTick) G<float>(part + flash::kClipX) = right;
+        if (depth == kBarScan) {
+            G<float>(part + flash::kClipScaleX) = stretch;
+            G<float>(part + flash::kClipX) = kBarLeft + (stock.scan - kBarLeft) * stretch;
+        }
+    }
+}
+
+// the flashes reach as far past the stock bar as the bar does, their left ends kept
+void StretchFlashes(const Page& p, uint32_t holder, float right) {
+    float scale = 1.0f + (right - p.host->bar.tick) / kFlashWidth;
+    int left = 256;
+    for (uint32_t part = flash::FirstChild(holder); part && left; part = R32(part + flash::kClipNext), left--) {
+        int depth = flash::Depth(part);
+        if (depth < kFlashFirst || depth > kFlashLast) continue;
+        float& x = G<float>(part + flash::kClipX);
+        float& now = G<float>(part + flash::kClipScaleX);
+        x += (now - scale) * kFlashLeft;
+        now = scale;
+    }
+}
+
+// Delete on a binding row
+void Clear(X86Context& ctx, const Row* row) {
+    if (!row || row->kind != app::rows::Kind::Bind) return;
+    std::string was = app::rows::Value(*row);
+    input::Unbind(size_t(row->id));
+    if (app::rows::Value(*row) != was) Sound(ctx);
+}
+
+const Host* FindHost(const char* name) {
+    for (const Host& h : kHosts)
+        if (std::strcmp(name, h.page) == 0) return &h;
+    return nullptr;
+}
+
+uint32_t SubtitlePreviewBackground(X86Context& ctx, uint32_t root) {
+    uint32_t main = Member(ctx, root, "Main");
+    uint32_t selector = Member(ctx, main, "ButtonSelector");
+    if (!main || flash::Type(selector) != flash::kSprite) return 0;
+
+    constexpr char kName[] = "RC_SubtitlePreviewBg";
+    uint32_t background = Member(ctx, main, kName);
+    if (flash::Type(background) != flash::kSprite) {
+        background = Copy(ctx, main, "_level4.Main.ButtonSelector", kName, flash::Depth(selector) - 1);
+        if (flash::Type(background) != flash::kSprite) return 0;
+    }
+
+    uint32_t data = R32(background + flash::kClipData);
+    if (data && data != flash::kNoData) {
+        W32(data + flash::kDataFrame, kBarRest);
+        W32(data + flash::kDataFlags, R32(data + flash::kDataFlags) & ~flash::kDataPlaying);
+    }
+    bool found_box = false;
+    for (uint32_t part = flash::FirstChild(background); part; part = R32(part + flash::kClipNext)) {
+        if (flash::Depth(part) == kBarBox) {
+            W32(part + flash::kClipFlags, R32(part + flash::kClipFlags) | flash::kClipShown);
+            found_box = true;
+        } else {
+            Hide(part);
+        }
+    }
+    if (!found_box) return 0;
+    W32(background + flash::kClipFlags, R32(background + flash::kClipFlags) | flash::kClipShown);
+    return background;
+}
+
+// the page's clips made again: the stock buttons and ours, or the rows of the mode asked for
+void Build(X86Context& ctx, const Host& host, uint32_t root, uint32_t holder, uint32_t menu) {
+    Page& p = g_page;
+    p = {};
+    for (Field& f : g_fields) f.data = 0;
+    p.host = &host;
+    p.mode = g_next;
+    g_next = 0;
+    // back from a category is its list
+    const Row* back = nullptr;
+    if (!p.mode && Grouped(host, g_last) && g_group) {
+        back = g_group;
+        g_group = nullptr;
+        p.mode = g_last;
+    }
+    p.failed = !(p.mode ? Rows(ctx, root, holder, menu) : Entries(ctx, root, holder));
+    if (!p.failed && IsSubtitlePage(p)) p.preview_background = SubtitlePreviewBackground(ctx, root);
+    const char* shown = p.mode ? PageCaption(p) : "buttons";
+    LOGI("options menu: %s, %s%s", host.page, shown, p.failed ? ", failed" : "");
+    if (!p.failed && !p.mode && g_last) Focus(ctx, p.entry[std::min(g_last, EntryCount(host)) - 1]);
+    else if (!p.failed && !p.mode && host.language) Focus(ctx, p.entry[0]);
+    size_t at = size_t(std::find(p.rows.begin(), p.rows.end(), back) - p.rows.begin());
+    if (!p.failed && back && at < p.slots) Focus(ctx, p.name[at]);
+    g_last = p.mode;
+}
+
+// the key binding's next step, see Page::capture
+void UpdateCapture(uint32_t ui, uint32_t id) {
+    Page& p = g_page;
+    int vk = input::PressedKey();
+    if (p.capture == 2 && vk) {
+        if (vk != kEscape) input::Bind(size_t(p.rows[p.bind]->id), vk);
+        p.capture = 3;
+    } else if (p.capture != 2 && !vk) {
+        p.capture = p.capture == 1 ? 2 : 0;
+    } else if (id == kInputBack) {
+        p.capture = 0;  // a controller's back
+    }
+    W32(ui + kMenuInput, 0);
+}
+
+// past either end the rows scroll, then go round; false off the ends
+bool UpdateScroll(X86Context& ctx, size_t slot, uint32_t id) {
+    Page& p = g_page;
+    const size_t visible_rows = p.slots - (p.pinned_row ? 1u : 0u);
+    if (!visible_rows || (p.pinned_row && slot == p.slots - 1)) return false;
+    size_t hidden = p.rows.size() - visible_rows;
+    if (id == kInputUp && slot == 0) {
+        if (p.top) {
+            p.top--;
+        } else {
+            p.top = hidden;
+            Focus(ctx, p.name[visible_rows - 1]);
+        }
+        return true;
+    }
+    if (id == kInputDown && slot == visible_rows - 1) {
+        if (p.top < hidden) {
+            p.top++;
+        } else {
+            p.top = 0;
+            Focus(ctx, p.name[0]);
+        }
+        return true;
+    }
+    return false;
+}
+
+// left, right or confirm on a row: a value steps, a binding listens, the last restores
+void ApplyRowInput(X86Context& ctx, size_t slot, uint32_t id, bool locked) {
+    Page& p = g_page;
+    const Row* row = VisibleRow(p, slot);
+    bool value = row && row->kind == app::rows::Kind::Value;
+    bool changes = id >= kInputLeft && id <= kInputConfirm;
+    if (IsSubtitlePage(p) && id == kInputBack) {
+        p.mode = 1;
+        Fill(p);
+        RefreshRows(ctx, p);
+        Focus(ctx, p.name[1]);
+    } else if (row && row->kind == app::rows::Kind::Page && id == kInputConfirm && p.host->language) {
+        p.mode = kSubtitleSettingsMode;
+        Fill(p);
+        RefreshRows(ctx, p);
+        Focus(ctx, p.name[0]);
+    } else if (value && changes) {
+        if (!locked) app::rows::Value(*row, id == kInputLeft ? -1 : 1);
+    } else if (row && row->kind == app::rows::Kind::Action && id == kInputConfirm) {
+        app::rows::Activate(*row);
+    } else if (id == kInputConfirm && row && row->kind == app::rows::Kind::Heading) {
+        g_group = row;
+        g_next = p.mode;
+    } else if (id == kInputConfirm && row) {
+        if (row->kind == app::rows::Kind::Bind) {
+            p.capture = 1;
+            p.bind = p.top + slot;
+        }
+    } else if (id == kInputConfirm && !row) {
+        app::rows::Defaults(PageIndex(p));
+    }
+}
+
+void UpdateRow(X86Context& ctx, uint32_t ui, size_t slot, uint32_t id, bool clear) {
+    const Row* row = VisibleRow(g_page, slot);
+    if (clear) Clear(ctx, row);
+    bool value = row && row->kind == app::rows::Kind::Value;
+    bool locked = row && !app::rows::Enabled(*row);  // greyed in the panel
+    bool edge = UpdateScroll(ctx, slot, id);
+    if (edge) {
+        W32(ui + kMenuInput, 0);
+    } else {
+        ApplyRowInput(ctx, slot, id, locked);
+    }
+    bool stepped = value && !locked && (id == kInputLeft || id == kInputRight);
+    if (edge || stepped) Sound(ctx);
+}
+
+// the title, the rows' names and values
+void UpdateTexts(const Page& p) {
+    // a value lights up with its name: a clip's matrix, then its colours
+    constexpr uint32_t kMatrixAndColours = 0x38;
+    Write(g_fields[kTitle], app::Ui(g_group ? g_group->label : PageCaption(p)));
+    for (size_t i = 0; i < p.slots; i++) {
+        const Row* row = VisibleRow(p, i);
+        Write(g_fields[kName + i], NameText(row));
+        Write(g_fields[kValue + i], ValueText(p, row, p.top + i));
+        uint32_t from = flash::FirstChild(p.name[i]);
+        uint32_t to = flash::FirstChild(p.value[i]);
+        if (!from || !to) continue;
+        std::memcpy(HostPtr(to + flash::kClipMatrix), HostPtr(from + flash::kClipMatrix), kMatrixAndColours);
+    }
+    if (IsSubtitlePage(p) && p.pinned_row && p.slots) Write(g_fields[kValue + p.slots - 1], "");
+}
+
+// Render the preview with the same Flash text field and dark selector box as the game's own menu.
+void UpdateSubtitlePreview(X86Context& ctx, Page& p) {
+    if (!p.host || !IsSubtitlePage(p) || !p.pinned_row || !p.slots) {
+        Hide(p.preview_background);
+        app::SetSubtitlePreview({}, 0.0f, 0.0f, false);
+        return;
+    }
+    const uint32_t root = flash::Level(flash::kMenuLevel);
+    const uint32_t main = Member(ctx, root, "Main");
+    const uint32_t font = CallGuest(ctx, kFindFont, {R32(kGame), kFontName});
+    const uint32_t background = p.preview_background;
+    if (!main || !font) {
+        Hide(background);
+        app::SetSubtitlePreview({}, 0.0f, 0.0f, false);
+        return;
+    }
+
+    const std::string label = app::Ui(p.pinned_row->label);
+    const size_t r = label.find('R');
+    const std::string before_r = r == std::string::npos ? std::string{} : label.substr(0, r);
+    // One small in-game-font sample directly below the PREVIEW row.
+    const std::string sample(subtitles::PreviewSample());
+    const float size = float(game::Opt().subtitle_size) / 100.0f;
+    const uint32_t caption_font = R32(kCaptionFont);
+    float text_width = 0.0f;
+    size_t line_count = 0;
+    for (size_t start = 0; start <= sample.size();) {
+        const size_t end = sample.find('\n', start);
+        const std::string line = sample.substr(start, end == std::string::npos ? end : end - start);
+        text_width = std::max(text_width, caption_font
+            ? MeasureCaption(caption_font, line, p.host->scale)
+            : Measure(font, line) * kTextHeight * size * p.host->scale);
+        ++line_count;
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    const float pad_x = 8.0f * p.host->scale, pad_y = 4.0f * p.host->scale;
+    const float box_width = std::max(1.0f, p.host->bar.tick - kBarLeft);
+
+    uint32_t box = 0;
+    if (background) {
+        for (uint32_t part = flash::FirstChild(background); part; part = R32(part + flash::kClipNext)) {
+            if (flash::Depth(part) == kBarBox) {
+                box = part;
+                break;
+            }
+        }
+    }
+    if (!box) {
+        Hide(background);
+    } else {
+        G<float>(box + flash::kClipScaleX) = (text_width + pad_x * 2.0f) / box_width;
+        G<float>(box + flash::kClipScaleY) =
+            (kTextHeight * size * line_count * 1.35f * p.host->scale + pad_y * 2.0f) / p.host->pitch;
+    }
+
+    // Keep the backing selector in Main-local space, matching the menu's own row coordinates.
+    float x = kTextLeft + Measure(font, before_r) * kTextHeight;
+    float y = p.host->pitch;
+    for (uint32_t clip = p.name[p.slots - 1], left = 0;
+         clip && clip != main && left < 32; clip = R32(clip + flash::kClipParent), left++) {
+        const float a = G<float>(clip + 0x0C), b = G<float>(clip + 0x10);
+        const float c = G<float>(clip + 0x14), d = G<float>(clip + 0x18);
+        const float tx = G<float>(clip + 0x1C), ty = G<float>(clip + 0x20);
+        const float transformed_x = a * x + c * y + tx;
+        y = b * x + d * y + ty;
+        x = transformed_x;
+    }
+    if (background && box) {
+        G<float>(background + flash::kClipScaleX) = 1.0f;
+        G<float>(background + flash::kClipScaleY) = 1.0f;
+        G<float>(background + 0x10) = 0.0f;
+        G<float>(background + 0x14) = 0.0f;
+        G<float>(background + flash::kClipX) = x - pad_x - kBarLeft;
+        G<float>(background + flash::kClipY) = y - pad_y;
+    }
+    // Native captions use viewport coordinates based on a 480-line frame. Continue through Main
+    // and the remaining Flash ancestors, then convert the 640x480 stage's X to that basis.
+    float screen_x = x, screen_y = y;
+    for (uint32_t clip = main, left = 0; clip && left < 32; clip = R32(clip + flash::kClipParent), left++) {
+        const float a = G<float>(clip + 0x0C), b = G<float>(clip + 0x10);
+        const float c = G<float>(clip + 0x14), d = G<float>(clip + 0x18);
+        const float tx = G<float>(clip + 0x1C), ty = G<float>(clip + 0x20);
+        const float transformed_x = a * screen_x + c * screen_y + tx;
+        screen_y = b * screen_x + d * screen_y + ty;
+        screen_x = transformed_x;
+    }
+    screen_x *= game::Aspect() * 480.0f / 640.0f;
+    app::SetSubtitlePreview(sample, screen_x, screen_y, true);
+    G<float>(p.value[p.slots - 1] + flash::kClipScaleX) = p.host->scale * size;
+    G<float>(p.value[p.slots - 1] + flash::kClipScaleY) = p.host->scale * size;
+    if (box) {
+        if (!game::Opt().subtitle_background) Hide(box);
+        else W32(box + flash::kClipFlags, R32(box + flash::kClipFlags) | flash::kClipShown);
+    }
+    if (background && box)
+        W32(background + flash::kClipFlags, R32(background + flash::kClipFlags) | flash::kClipShown);
+}
+
+
+void Tick(X86Context& ctx, uint32_t ui) {
+    // read every tick, so a Delete that answers a capture is not a fresh press once it ends
+    bool clear = input::TakeDeletePress();
+    Page& p = g_page;
+    const char* name = static_cast<const char*>(HostPtr(ui + kPageName));
+    const Host* host = FindHost(name);
+    bool running = host && R32(flash::kPlayerReady) == 1 && R32(flash::kPlayer) && R32(ui + kPageReady) == kPageRunning;
+    if (!running) {
+        Hide(p.preview_background);
+        if (*name && !host) {
+            g_next = g_last = 0;
+            g_group = nullptr;
+        }
+        p = {};
+        return;
+    }
+    uint32_t going = R32(ui + kPageLeaving);
+    bool leaving = going || R32(ui + kPageAsked) == 1;
+    uint32_t root = flash::Level(flash::kMenuLevel);
+    uint32_t holder = Member(ctx, root, "Main");
+    uint32_t menu = Member(ctx, root, "MyMenu");
+    if (host->holder) holder = Member(ctx, holder, host->holder);
+    if (!holder || !menu) return;
+    if (p.failed) {
+        if (going == 1) {
+            Hide(p.preview_background);
+            p = {};
+        }
+        return;
+    }
+    if (p.mode < 0 || Member(ctx, holder, p.mode ? "RC_N0" : "RC_E0") != p.first) {
+        if (!leaving) Build(ctx, *host, root, holder, menu);
+        return;
+    }
+    Follow(ctx, p);
+    UpdateSubtitlePreview(ctx, p);
+    uint32_t id = InputTaken(ui) ? R32(ui + kMenuInput) : 0;
+    if (IsSubtitlePage(p) && id == kInputBack) {
+        W32(ui + kMenuInput, 0);
+        p.mode = 1;
+        Fill(p);
+        RefreshRows(ctx, p);
+        Focus(ctx, p.name[1]);
+        UpdateTexts(p);
+        UpdateSubtitlePreview(ctx, p);
+        return;
+    }
+    if (going == 1) {
+        Hide(p.preview_background);
+        p = {};
+    }
+    if (leaving) return;
+    uint32_t focus = Member(ctx, menu, "mFocusButton");
+    if (!p.mode) {
+        const uint32_t* at = std::find(std::begin(p.entry), std::begin(p.entry) + EntryCount(*p.host), focus);
+        if (id == kInputConfirm && at != std::begin(p.entry) + EntryCount(*p.host)) {
+            g_next = int(at - p.entry) + 1;
+            g_group = nullptr;
+        }
+        return;
+    }
+    size_t slot = size_t(std::find(p.name, p.name + p.slots, focus) - p.name);
+    if (p.capture) {
+        UpdateCapture(ui, id);
+    } else if (slot < p.slots) {
+        UpdateRow(ctx, ui, slot, id, clear);
+    }
+    UpdateTexts(p);
+    UpdateSubtitlePreview(ctx, p);
+    if (slot >= p.slots) return;
+    float right = std::max(p.host->bar.tick, Reach(ctx, p, focus));
+    StretchBar(ctx, p, root, right);
+    if (p.host->flashes) StretchFlashes(p, holder, right);
+}
+
+}  // namespace
+
+// ebp the front end, after the cursor's input and before the Flash player runs the page's script
+void OptionsMenu(X86Context& ctx, uint8_t*) {
+    X86Context saved = ctx;
+    Tick(ctx, ctx.ebp);
+    ctx = saved;
+}
+
+namespace game {
+
+// mouse.cpp: a key binding takes the next click
+bool OptionsCapturing() { return g_page.capture != 0; }
+
+// prompts.cpp's string lookup: a text of the page by its string id, 0 for none
+uint32_t OptionsText(uint32_t id) {
+    for (const Field& f : g_fields)
+        if (f.text && f.id == id) return f.text;
+    return 0;
+}
+
+}  // namespace game

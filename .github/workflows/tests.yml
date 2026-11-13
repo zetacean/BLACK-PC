@@ -1,0 +1,33 @@
+name: Tests
+
+# The subtitle and save-storage checks. They need no game files, so GitHub's own runners build them.
+on:
+  push:
+    paths:
+      - "src/common/subtitle*"
+      - "src/common/save_*"
+      - "tests/**"
+      - ".github/workflows/tests.yml"
+  pull_request:
+    paths:
+      - "src/common/subtitle*"
+      - "src/common/save_*"
+      - "tests/**"
+      - ".github/workflows/tests.yml"
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            src/common
+            tests
+      - name: Configure
+        run: cmake -S tests -B out/tests -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build out/tests
+      - name: Run
+        run: ctest --test-dir out/tests --output-on-failure
