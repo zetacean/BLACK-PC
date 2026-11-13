@@ -907,6 +907,8 @@ void DrawWeapons() {
     if (ImGui::Button(Ui("FILL AMMUNITION").c_str(), ImVec2(w, 0))) weapons::FillAmmo();
     bool health = weapons::InfiniteHealth();
     if (ImGui::Checkbox(Ui("INFINITE HEALTH").c_str(), &health)) weapons::SetInfiniteHealth(health);
+    bool no_reload = weapons::NoReload();
+    if (ImGui::Checkbox(Ui("NO RELOAD").c_str(), &no_reload)) weapons::SetNoReload(no_reload);
     if (!v.status.empty()) {
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Text, kDim);

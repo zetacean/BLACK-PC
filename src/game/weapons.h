@@ -21,6 +21,8 @@ View Current();      // any thread
 void Give(int type);  // any thread: done on the game thread's next tick
 void SetInfiniteHealth(bool on);  // any thread: the player's health kept full
 bool InfiniteHealth();
+void SetNoReload(bool on);  // any thread: the magazines kept full, no weapon needs reloading
+bool NoReload();
 void FillAmmo();      // any thread: both slots' ammunition to full
 
 }  // namespace weapons

@@ -49,7 +49,7 @@ Trampas de entorno ya vistas: en Git Bash pon `MSYS_NO_PATHCONV=1` para pasar `/
 
 ## Estado y límites conocidos
 
-- Sin implementar: elegir qué arma reemplaza una nueva (se intentó en F10 por dos caminos y falló por la animación del arma en mano; la vía real es enganchar la recogida del suelo), munición infinita y modo Dios real (la salud infinita sí está: `player+0x2F0`, float, 1200 al máximo; la munición ya tiene botón de rellenar), sprint (se midió: correr es 4,5 u/s y no hay campo de velocidad localizado; se descartó), silenciador, botón de idioma en el menú de pausa (otro clip Flash, sin poder ver el resultado), upscaling DLSS/FSR.
+- Sin implementar: elegir qué arma reemplaza una nueva (se intentó en F10 por dos caminos y falló por la animación del arma en mano; la vía real es enganchar la recogida del suelo), munición infinita y modo Dios real (la salud infinita y la sin recarga sí están: salud `player+0x2F0`, float, 1200 al máximo; balas cargadas `cargador+0x18`, int; la munición ya tiene botón de rellenar), sprint (se midió: correr es 4,5 u/s y no hay campo de velocidad localizado; se descartó), silenciador, botón de idioma en el menú de pausa (otro clip Flash, sin poder ver el resultado), upscaling DLSS/FSR.
 - Sin validar: gyro con mando real, una partida completa, el workflow de release en GitHub, el test con MSVC.
 - Las traducciones del instalador (fr, de, it, pt-BR, ru) las hizo una IA: pendientes de revisión nativa.
 - La licencia propia no existe: ninguno de los dos repos base publica una. Solo se incluye la MIT del SDK y los avisos de terceros.

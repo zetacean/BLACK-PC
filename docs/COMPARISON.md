@@ -26,7 +26,7 @@ Leyenda: ✔ está en el código fuente · ✘ no está · ◐ solo lo anuncia e
 | Subtítulos de cinemáticas con tamaño, color, sombra, fondo y vista previa | ✘ | ✔ | ✔ |
 | Guardado propio (carpeta de usuario estable, importación segura) | ✘ | ✔ | ✔ |
 | F10 > Weapons: dar cualquier arma del nivel y rellenar munición | ✘ | ✔ | ✔ |
-| Salud infinita (casilla en F10 > Weapons) | ✘ | ✘ | ✔ |
+| Salud infinita y sin recarga (casillas en F10 > Weapons) | ✘ | ✘ | ✔ |
 | Munición infinita, armas plateadas, modo Dios | ✘ | ◐ | ✘ |
 | Correr ajustable, recarga rápida, granadas cocinadas, botiquín automático, inclinación táctica, multiplicador de daño | ✘ | ◐ | ✘ |
 | HUD V2.0 (mira extra, % de vida, marcadores de impacto, aviso de granada, marcadores de enemigos) | ✘ | ◐ | ✘ |
@@ -92,7 +92,7 @@ Key: ✔ in the source · ✘ not there · ◐ only advertised in the README, **
 | Cutscene subtitles with size, colour, shadow, background and preview | ✘ | ✔ | ✔ |
 | Own save handling (stable user folder, safe import) | ✘ | ✔ | ✔ |
 | F10 > Weapons: give any weapon of the level, refill ammo | ✘ | ✔ | ✔ |
-| Infinite health (checkbox in F10 > Weapons) | ✘ | ✘ | ✔ |
+| Infinite health and no reload (checkboxes in F10 > Weapons) | ✘ | ✘ | ✔ |
 | Infinite ammo, silver weapons, God Mode | ✘ | ◐ | ✘ |
 | Adjustable sprint, faster reload, grenade cooking, auto medkit, tactical lean, damage multiplier | ✘ | ◐ | ✘ |
 | V2.0 HUD (extra crosshair, health %, hit markers, grenade warning, enemy markers) | ✘ | ◐ | ✘ |

@@ -73,6 +73,7 @@ constexpr uint32_t kWeaponType = 0;  // byte: index in the table
 constexpr uint32_t kWeaponData = 0xEC;
 constexpr uint32_t kWeaponMagazine = 0xF4;  // the main fire's magazine, +0xF8 the alternate fire's
 constexpr uint32_t kMagazineData = 8;
+constexpr uint32_t kMagazineLoaded = 0x18;  // int: rounds in the magazine (found by firing five from a full twelve)
 constexpr uint32_t kDataClip = 0x60;
 constexpr uint32_t kDataAmmoType = 0x64;
 
@@ -123,6 +124,7 @@ weapons::View g_view;
 std::atomic<int> g_give{-1};
 std::atomic<bool> g_fill{false};
 std::atomic<bool> g_health{false};
+std::atomic<bool> g_no_reload{false};
 
 void SetStatus(const std::string& text) {
     std::lock_guard<std::mutex> lock(g_lock);
@@ -406,6 +408,22 @@ void FillWeapon(const Level& l, uint32_t weapon, bool top_up) {
         if (uint32_t mag = R32(weapon + kWeaponMagazine + m * 4)) FillType(l, R32(mag + kMagazineData), top_up);
 }
 
+// every magazine of both weapons back to the full clip: it never empties, so the game never asks for a reload
+void KeepMagazines(const Level& l) {
+    for (int i = 0; i < 2; i++) {
+        uint32_t w = Slot(l, i);
+        if (!w) continue;
+        for (uint32_t m = 0; m < 2; m++) {
+            uint32_t mag = R32(w + kWeaponMagazine + m * 4);
+            uint32_t data = mag ? R32(mag + kMagazineData) : 0;
+            if (!data) continue;
+            uint32_t clip = G<uint16_t>(data + kDataClip);
+            if (clip && clip <= 999 && G<int32_t>(mag + kMagazineLoaded) < int32_t(clip))
+                G<int32_t>(mag + kMagazineLoaded) = int32_t(clip);
+        }
+    }
+}
+
 void DoGive(X86Context& ctx, int type) {
     Level l;
     if (!ReadLevel(l)) return SetStatus("Only during a level");
@@ -466,6 +484,10 @@ void SetInfiniteHealth(bool on) { g_health = on; }
 
 bool InfiniteHealth() { return g_health; }
 
+void SetNoReload(bool on) { g_no_reload = on; }
+
+bool NoReload() { return g_no_reload; }
+
 }  // namespace weapons
 
 // game thread, each menu and HUD tick (hooks.cpp MenuTick)
@@ -473,6 +495,10 @@ void WeaponsTick(X86Context& ctx) {
     static int tick;
     if (int type = g_give.exchange(-1); type >= 0) DoGive(ctx, type);
     if (g_fill.exchange(false)) DoFill();
+    if (g_no_reload) {
+        Level l;
+        if (ReadLevel(l)) KeepMagazines(l);
+    }
     if (g_health) {
         Level l;
         // a dead player (0 or less) is not brought back
