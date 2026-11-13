@@ -73,7 +73,7 @@ constexpr uint32_t kWeaponType = 0;  // byte: index in the table
 constexpr uint32_t kWeaponData = 0xEC;
 constexpr uint32_t kWeaponMagazine = 0xF4;  // the main fire's magazine, +0xF8 the alternate fire's
 constexpr uint32_t kMagazineData = 8;
-constexpr uint32_t kMagazineLoaded = 0x18;  // int: rounds in the magazine (found by firing five from a full twelve)
+constexpr uint32_t kMagazineLoaded = 0x18;  // word: rounds in the magazine; the upper half holds other things (WA 2000: 0xC70005)
 constexpr uint32_t kDataClip = 0x60;
 constexpr uint32_t kDataAmmoType = 0x64;
 
@@ -418,8 +418,8 @@ void KeepMagazines(const Level& l) {
             uint32_t data = mag ? R32(mag + kMagazineData) : 0;
             if (!data) continue;
             uint32_t clip = G<uint16_t>(data + kDataClip);
-            if (clip && clip <= 999 && G<int32_t>(mag + kMagazineLoaded) < int32_t(clip))
-                G<int32_t>(mag + kMagazineLoaded) = int32_t(clip);
+            if (clip && clip <= 999 && G<uint16_t>(mag + kMagazineLoaded) < clip)
+                G<uint16_t>(mag + kMagazineLoaded) = uint16_t(clip);
         }
     }
 }
